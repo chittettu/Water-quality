@@ -1,4 +1,4 @@
-########Add data.
+
 ########Add geometry of the study area
 var datasets = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED");
 var dataset = datasets.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
