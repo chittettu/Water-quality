@@ -1,0 +1,111 @@
+
+var datasets = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED");
+var dataset = datasets.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
+                      .filter(ee.Filter.date('2021-10-01', '2021-12-31'))
+                      .filter(ee.Filter.bounds(geometry));
+                    
+print(dataset)
+
+Map.centerObject(geometry,12.8)
+// Write a function for Cloud masking
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0).and(
+             qa.bitwiseAnd(cirrusBitMask).eq(0));
+  return image.updateMask(mask).multiply(0.0001)
+      .select('B.*')
+      .copyProperties(image, ['system:time_start']);
+}
+
+var filtered = dataset.map(maskS2clouds);
+
+var img= filtered.mean().clip(geometry)
+print(img)
+
+var mndwi_f=function(image){
+         var mndwi=image.normalizedDifference(['B3','B11']).rename('MNDWI')
+         return image.addBands(mndwi)
+         .updateMask(mndwi.gt(0))
+}
+         
+var water=mndwi_f(img)
+
+// Define variables for SPM calculation
+var A = ee.Image.constant(289.29);
+var C = ee.Image.constant(0.1686);
+var SPM = 'A * rho / (1 - rho / C)';
+
+// Define a function to calculate SPM
+var getSpm = function(image) {
+    // Define the spectral bands
+  var rho = image.select('B4');
+  return image.expression(SPM, {'A': A, 'C': C, 'rho': rho}).rename('SPM')
+  
+}
+
+var spm_f=getSpm(water)
+
+// create vizualization parameters
+var viz = {min:5, max:20, palette:['ffffff','b7f0ae','21f600','0000FF','FDFF92','FF2700','d600ff']};
+
+// add the map
+Map.addLayer(spm_f, viz);
+
+// set position of panel
+var legend = ui.Panel({
+style: {
+position: 'bottom-left',
+padding: '8px 15px'
+}
+});
+
+// Create legend title
+var legendTitle = ui.Label({
+value: 'SPM (mg/L)',
+style: {
+fontWeight: 'bold',
+fontSize: '18px',
+margin: '0 0 4px 0',
+padding: '0'
+}
+});
+
+// Add the title to the panel
+legend.add(legendTitle);
+
+// create the legend image
+var lon = ee.Image.pixelLonLat().select('latitude');
+var gradient = lon.multiply((viz.max-viz.min)/100.0).add(viz.min);
+var legendImage = gradient.visualize(viz);
+
+// create text on top of legend
+var panel = ui.Panel({
+widgets: [
+ui.Label(viz['max'])
+],
+});
+
+legend.add(panel);
+
+// create thumbnail from the image
+var thumbnail = ui.Thumbnail({
+image: legendImage,
+params: {bbox:'0,0,10,100', dimensions:'10x200'},
+style: {padding: '1px', position: 'bottom-center'}
+});
+
+// add the thumbnail to the legend
+legend.add(thumbnail);
+
+// create text on top of legend
+var panel = ui.Panel({
+widgets: [
+ui.Label(viz['min'])
+],
+});
+
+legend.add(panel);
+
+Map.add(legend);
